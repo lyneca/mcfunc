@@ -92,6 +92,7 @@ fn main() {
     for line in lines {
         let command_line = line.expect("File is empty");
         let mut command_line = command_line.as_str();
+        if command_line.trim().is_empty() { continue };
         if command_line.trim().starts_with('#') { continue };
         hanging = command_line.starts_with(' ');
         if hanging {
