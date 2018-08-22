@@ -11,6 +11,8 @@ use std::io::{BufReader, BufRead};
 
 const PREFIX: &str = "/summon minecraft:command_block_minecart ~ ~3 ~ {Passengers:[";
 
+
+#[allow(dead_code)]
 enum CommandBlockType {
     Impulse,
     Chain,
@@ -76,16 +78,21 @@ impl CommandBlock {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    if args.len() < 2 {
+        println!("Requires a path to a .mcfunction file.");
+        return;
+    }
     let filename = &args[1];
     let file = File::open(filename).expect("Couldn't open file");
     let lines = BufReader::new(&file).lines();
 
     let mut commands: Vec<Command> = Vec::new();
 
-    let mut hanging = false;
+    let mut hanging;
     for line in lines {
         let command_line = line.expect("File is empty");
         let mut command_line = command_line.as_str();
+        if command_line.trim().starts_with('#') { continue };
         hanging = command_line.starts_with(' ');
         if hanging {
             let mut last_line = commands.pop().expect("Invalid indentation");
@@ -115,8 +122,8 @@ fn main() {
     final_command.push_str("]}");
     let mut ctx: ClipboardContext = ClipboardProvider::new().unwrap();
     ctx.set_contents(final_command.to_owned()).unwrap();
+    println!("Put this in a command block and run it. Run the resulting minecarts over an activator rail.");
     println!("Final Command:");
     println!("{}", final_command);
-    println!("(Copied to clipboard, waiting for a few seconds)");
-    sleep(Duration::from_secs(5));
+    sleep(Duration::from_secs(1));
 }
