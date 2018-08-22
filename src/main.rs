@@ -1,14 +1,86 @@
+extern crate clipboard;
+
+use clipboard::ClipboardProvider;
+use clipboard::ClipboardContext;
+
+use std::thread::sleep;
+use std::time::Duration;
+
 use std::fs::{File};
 use std::io::{BufReader, BufRead};
 
 const PREFIX: &str = "/summon minecraft:command_block_minecart ~ ~3 ~ {Passengers:[";
+
+enum CommandBlockType {
+    Impulse,
+    Chain,
+    Repeat
+}
+
+#[derive(Debug)]
+struct Command {
+    command: String
+}
+
+impl Command {
+    fn new(command: String) -> Command {
+        Command { command }
+    }
+    fn from_str(command: &str) -> Command {
+        Command { command: String::from(command) }
+    }
+    fn to_minecart(&self) -> String {
+        format!("{{id:command_block_minecart,Command:\"{}\"}},", self.escape().command)
+    }
+    fn escape(&self) -> Command {
+        Command { command: self.command.replace("\\", "\\\\").replace("\"", "\\\"") }
+    }
+}
+
+struct CommandBlock {
+    variant: CommandBlockType,
+    command: Command,
+    conditional: bool,
+    redstone: bool
+}
+
+use CommandBlockType::*;
+
+impl CommandBlock {
+    fn repeat(command: Command, redstone: bool) -> CommandBlock {
+        CommandBlock {
+            variant: CommandBlockType::Repeat,
+            command,
+            conditional: false,
+            redstone
+        }
+    }
+    fn chain(command: Command, conditional: bool, redstone: bool) -> CommandBlock {
+        CommandBlock {
+            variant: CommandBlockType::Chain,
+            command, conditional, redstone
+        }
+    }
+    fn setblock(&self, block_pos: i32) -> Command {
+        let string_prefix = format!("setblock ~ ~{} ~ minecraft:{}[facing=down,conditional={}]", block_pos, match self.variant {
+            Impulse => "command_block",
+            Chain => "chain_command_block",
+            Repeat => "repeating_command_block"
+        }, self.conditional);
+        let mut command_string = String::from(string_prefix);
+        let command_tag = format!("{{Command:\"{}\",auto:{}}}", self.command.escape().command, self.redstone);
+        command_string.push_str(command_tag.as_str());
+        Command::new(command_string)
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let filename = &args[0];
-    let file = File::open("test.mcfunction").expect("Couldn't open file");
+    let filename = &args[1];
+    let file = File::open(filename).expect("Couldn't open file");
     let lines = BufReader::new(&file).lines();
 
-    let mut commands: Vec<String> = Vec::new();
+    let mut commands: Vec<Command> = Vec::new();
 
     let mut hanging = false;
     for line in lines {
@@ -17,46 +89,34 @@ fn main() {
         hanging = command_line.starts_with(' ');
         if hanging {
             let mut last_line = commands.pop().expect("Invalid indentation");
-            last_line.push_str(" ");
-            last_line.push_str(command_line.trim());
+            last_line.command.push_str(" ");
+            last_line.command.push_str(command_line.trim());
             commands.push(last_line);
         } else {
-            commands.push(String::from(command_line.trim()));
+            commands.push(Command::new(String::from(command_line.trim())));
         }
     }
     println!("Input Commands:");
     for i in commands.iter() {
-        println!(":: {}", i);
+        println!(":: {:?}", i);
     }
     let mut final_command: String = String::from(PREFIX);
     let mut i = 1;
     for command in commands {
-        if i == 1 {
-            final_command.push_str(&to_minecart(repeating(command, i)));
-        } else {
-            final_command.push_str(&to_minecart(chain(command, i)));
-        }
+        let block = match i {
+            1 => CommandBlock::repeat(command, false),
+            _ => CommandBlock::chain(command, true, true),
+        };
+        final_command.push_str(block.setblock(-i).to_minecart().as_str());
         i += 1;
     }
+    let kill_command = Command::from_str("kill @e[type=command_block_minecart,distance=0..1.5]");
+    final_command.push_str(kill_command.to_minecart().as_str());
     final_command.push_str("]}");
+    let mut ctx: ClipboardContext = ClipboardProvider::new().unwrap();
+    ctx.set_contents(final_command.to_owned()).unwrap();
     println!("Final Command:");
     println!("{}", final_command);
-}
-
-fn repeating(command: String, block: i32) -> String {
-    format!("setblock ~ ~-{} ~ minecraft:repeating_command_block{{Command:\"{}\"}}", block, escape(command))
-}
-
-fn chain(command: String, block: i32) -> String {
-    format!("setblock ~ ~-{} ~ minecraft:chain_command_block{{Command:\"{}\"}}", block, escape(command))
-}
-
-fn to_minecart(command: String) -> String {
-    // println!(" - Adding minecart with command: {}", escape(command));
-    format!("{{id:command_block_minecart,Command:\"{}\"}},", escape(command))
-    // String::from("hello")
-}
-
-fn escape(string: String) -> String {
-    string.replace("\\", "\\\\").replace("\"", "\\\"")
+    println!("(Copied to clipboard, waiting for a few seconds)");
+    sleep(Duration::from_secs(5));
 }
